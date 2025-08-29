@@ -1,10 +1,175 @@
+use image::GenericImageView;
+use wgpu::util::DeviceExt;
+
+// Classe para criar texturas
+//----------------------------------------------------------------------------------
+struct Texture {
+    texture: wgpu::Texture,
+    view: wgpu::TextureView,
+    sampler: wgpu::Sampler
+}
+
+impl Texture {
+    // Decodifica bytes de imagem na memória e cria uma textura na GPU chamando from_image
+    fn from_bytes(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        bytes: &[u8],
+        label: &str
+    ) -> anyhow::Result<Self> {
+        // Tenta decodificar os bytes em memória (bytes) como uma imagem (PNG, JPEG etc.) 
+        let texture_image = image::load_from_memory(bytes)?;
+        
+        // Chama a função from_image
+        Self::from_image(device, queue, &texture_image, Some(label))
+    }
+
+    // Cria uma textura na GPU a partir de uma imagem da CPU, configurando seus pixels, view e sampler
+    fn from_image(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        texture_image: &image::DynamicImage,
+        label: Option<&str>
+    ) -> anyhow::Result<Self> {
+        // Converte a imagem (texture_image) para o formato de pixels RGBA com 8 bits por canal
+        let rgba = texture_image.to_rgba8();
+
+        // Pega a largura e a altura da imagem (texture_image) e retorna como uma tupla (u32, u32).
+        let dimensions = texture_image.dimensions();
+
+        // Cria um objeto Extent3d do wgpu que define as dimensões da textura a partir do tamanho da imagem.
+        let size = wgpu::Extent3d{
+            width: dimensions.0, // Largura
+            height: dimensions.1, // Altura
+            depth_or_array_layers: 1 // Profundidade / Camadas
+        };
+
+        // Cria uma textura 2D na GPU (com formato RGBA8 e suporte para ser usada em shaders e receber dados copiados da CPU).
+        let texture = device.create_texture(
+            &wgpu::TextureDescriptor {
+                label: label,
+                size: size,
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[]
+            }
+        );
+
+        // Copia os pixels da imagem RGBA da CPU (rgba) para a textura criada na GPU (texture).
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfoBase {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO, // Preenchendo-a a partir do nível 0 e origem (0,0).
+                aspect: wgpu::TextureAspect::All
+            },
+            &rgba,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(4 * dimensions.0),
+                rows_per_image: Some(dimensions.1)
+            },
+            size
+        );
+
+        // Cria uma "view" da textura na GPU, que é usada para acessar ou renderizar a textura em shaders.
+        let view = texture.create_view(
+            &wgpu::TextureViewDescriptor::default()
+        );
+
+        // Cria um sampler na GPU, que define como a textura será amostrada nos shaders (como filtrar, interpolar e lidar com coordenadas fora do limite).
+        let sampler = device
+            .create_sampler(
+                &wgpu::SamplerDescriptor {
+                    label: label,
+                    address_mode_u: wgpu::AddressMode::ClampToEdge,
+                    address_mode_v: wgpu::AddressMode::ClampToEdge,
+                    address_mode_w: wgpu::AddressMode::ClampToEdge,
+                    mag_filter: wgpu::FilterMode::Linear,
+                    min_filter: wgpu::FilterMode::Nearest,
+                    mipmap_filter: wgpu::FilterMode::Nearest,
+                    //lod_min_clamp: (),
+                    //lod_max_clamp: (),
+                    //compare: (),
+                    //anisotropy_clamp: (),
+                    //border_color: (),
+                    ..Default::default()
+                }
+            );
+        
+        // Retorna com sucesso (Ok) uma instância da struct contendo a textura, a view e o sampler criados
+        Ok(
+            Self {
+                texture: texture,
+                view: view,
+                sampler: sampler
+            }
+        )
+    }
+}
+//----------------------------------------------------------------------------------
+
+// Classe para criar vertices
+//----------------------------------------------------------------------------------
+#[repr(C)]
+#[derive(Clone, Copy, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+struct Vertex {
+    position: [f32; 3],
+    tex_coords: [f32; 2]
+    //color: [f32; 3]
+}
+
+impl Vertex {
+    // É um array de descrições de atributos do vértice.
+    // Aqui você diz como a GPU deve interpretar cada campo da sua struct Vertex.
+    const ATTRIBUTES: [wgpu::VertexAttribute; 2] = wgpu::vertex_attr_array![
+        0 => Float32x3,
+        1 => Float32x2
+        //1 => Float32x3
+    ];
+
+    // Retorna uma VertexBufferLayout, que descreve como os vértices estão organizados no buffer
+    fn desc<'a>() -> wgpu::VertexBufferLayout<'a> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<Self>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &Self::ATTRIBUTES
+        }
+    }
+}
+
+// Define um array constante de vértices (Vertex) com posições 3D e coordenadas de textura
+const VERTICES: &[Vertex] = &[
+    Vertex { position: [ -0.5, 0.5, 0.0], tex_coords: [0.0, 0.0] },//color: [ 1.0, 0.0, 0.0] }, //A
+    Vertex { position: [ -0.5, -0.5, 0.0], tex_coords: [0.0, 1.0] },//color: [ 0.0, 1.0, 0.0] }, //B
+    Vertex { position: [ 0.5, -0.5, 0.0], tex_coords: [1.0, 1.0] },//color: [ 0.0, 0.0, 1.0] }, //C
+    Vertex { position: [ 0.5, 0.5, 0.0], tex_coords: [1.0, 0.0] }//color: [ 0.0, 1.0, 0.0] } //D
+];
+
+// Define a ordem de desenho dos vértices (Nesse Caso forma um quadrado)
+const INDICES: &[u16] = &[
+    0, 1, 2,
+    0, 2, 3,
+];
+
+//----------------------------------------------------------------------------------
+
 // Classe de contexto do Wgpu
 //----------------------------------------------------------------------------------
 struct WgpuContext<'window_lifetime> {
     surface: wgpu::Surface<'window_lifetime>,
     adapter: wgpu::Adapter,
     device: wgpu::Device,
+    vertex_buffer: wgpu::Buffer,
+    num_vertices: u32,
+    index_buffer: wgpu::Buffer,
+    num_indices: u32,
     queue: wgpu::Queue,
+    diffuse_bind_group: wgpu::BindGroup,
+    diffuse_texture: Texture,
     surface_configuration: wgpu::SurfaceConfiguration,
     render_pipeline: wgpu::RenderPipeline
 }
@@ -56,6 +221,86 @@ impl<'window_lifetime> WgpuContext<'window_lifetime> {
             .await
             .expect("Failled to create device");
 
+        // Cria um vertex buffer (um pedaço de memória na GPU que armazena os vértices que você vai desenhar)
+        let vertex_buffer = device
+            .create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("Vertex Buffer"),
+                    contents: bytemuck::cast_slice(VERTICES),
+                    usage: wgpu::BufferUsages::VERTEX
+                }
+            );
+        
+        // Informa o tamanho da lista de vertices
+        let num_vertices = VERTICES.len() as u32;
+        
+        // Cria um index buffer (um pedaço de memória na GPU que armazena os indices dos vértices que você vai desenhar)
+        let index_buffer = device
+            .create_buffer_init(
+                &wgpu::util::BufferInitDescriptor {
+                    label: Some("Indices Buffer"),
+                    contents: bytemuck::cast_slice(INDICES),
+                    usage: wgpu::BufferUsages::INDEX
+                }
+            );
+        
+        // Informa o tamanho da lista de indices
+        let num_indices = INDICES.len() as u32;
+
+        // Inclui o arquivo como um array de bytes no binário em tempo de compilação, permitindo acessá-lo diretamente na memória.
+        let diffuse_bytes = include_bytes!("assets/tree.png");
+
+        // Cria uma textura na GPU a partir dos bytes da imagem (diffuse_bytes)
+        let diffuse_texture = Texture::from_bytes(&device, &queue, diffuse_bytes, "assets/tree.png").unwrap();
+
+        // Cria um layout de bind group na GPU, definindo como uma textura 2D e seu sampler serão acessados pelos shaders de fragmento.
+        let texture_bind_group_layout = device
+            .create_bind_group_layout(
+                &wgpu::BindGroupLayoutDescriptor {
+                    label: Some("Texture Bind Group Layout"),
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry{
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Texture {
+                                sample_type: wgpu::TextureSampleType::Float {
+                                    filterable: true
+                                },
+                                view_dimension: wgpu::TextureViewDimension::D2,
+                                multisampled: false
+                            },
+                            count: None
+                        },
+                        wgpu::BindGroupLayoutEntry{
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::FRAGMENT,
+                            ty: wgpu::BindingType::Sampler(
+                                wgpu::SamplerBindingType::Filtering
+                            ),
+                            count: None
+                        }
+                    ]
+                }
+            );
+        
+        // Cria um bind group que associa a textura e o sampler específicos ao layout definido, permitindo que os shaders usem esses recursos na renderização.
+        let diffuse_bind_group = device.create_bind_group(
+            &wgpu::BindGroupDescriptor {
+                label: Some("Diffuse Bind Group"),
+                layout: &texture_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry{
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&diffuse_texture.view)
+                    },
+                    wgpu::BindGroupEntry{
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&diffuse_texture.sampler)
+                    }
+                ]
+            }
+        );
+
         // Coleta o tamanho atual da janela
         let window_size = window.inner_size();
 
@@ -85,7 +330,7 @@ impl<'window_lifetime> WgpuContext<'window_lifetime> {
             .create_pipeline_layout(
                 &wgpu::PipelineLayoutDescriptor {
                     label: Some("Render Pipeline Layout"),
-                    bind_group_layouts: &[],
+                    bind_group_layouts: &[&texture_bind_group_layout],
                     push_constant_ranges: &[]
                 }
             );
@@ -100,7 +345,9 @@ impl<'window_lifetime> WgpuContext<'window_lifetime> {
                         module: &shader,
                         entry_point: Some("vs_main"),
                         compilation_options: wgpu::PipelineCompilationOptions::default(),
-                        buffers: &[] // sem buffer de vértices, usamos vertex_index
+                        buffers: &[
+                            Vertex::desc() // Informa o buffer para o wgsl
+                        ]
                     },
                     primitive: wgpu::PrimitiveState::default(), // Triangle List
                     depth_stencil: None,
@@ -130,7 +377,13 @@ impl<'window_lifetime> WgpuContext<'window_lifetime> {
             surface,
             adapter,
             device,
+            vertex_buffer,
+            num_vertices,
+            index_buffer,
+            num_indices,
             queue,
+            diffuse_bind_group,
+            diffuse_texture,
             surface_configuration,
             render_pipeline
         }
@@ -198,8 +451,18 @@ impl<'window_lifetime> WgpuContext<'window_lifetime> {
             // Configura o pipeline de renderização: Aqui você diz qual pipeline usar.
             render_pass.set_pipeline(&self.render_pipeline);
 
+            //
+            render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
+
+            // Define o vertex buffer enviado para GPU -- talvez mudar commentario --
+            render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+
+            // Define o index buffer enviado para GPU -- talvez mudar commentario --
+            render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+
             // Desenha os vértices: Esse comando dispara o vertex shader e o fragment shader do seu arquivo <archive_name>.wgsl.
-            render_pass.draw(0..3, 0..1);
+            //render_pass.draw(0..self.num_vertices, 0..1); // sem index
+            render_pass.draw_indexed(0..self.num_indices, 0, 0..1); // com index
         }
 
         // Envia os comandos para execução pela GPU.
@@ -225,8 +488,8 @@ struct WinitApplication<'window_lifetime> {
 }
 
 impl<'window_lifetime> winit::application::ApplicationHandler for WinitApplication<'window_lifetime> {
+    // Chamada quando a aplicação é retomada e cria a janela e o contexto WGPU se ainda não existirem.
     fn resumed(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
-
         if self.window.is_none() {
             // Declara a janela de forma assincrona
             let new_window = std::sync::Arc::new(
@@ -254,6 +517,7 @@ impl<'window_lifetime> winit::application::ApplicationHandler for WinitApplicati
         match event {
             // Evento quando a janela é fechada (X da janela)
             winit::event::WindowEvent::CloseRequested => {
+                // Encerra o loop da janela
                 event_loop.exit();
             },
             // Evento quando as teclas são acionadas
@@ -268,7 +532,9 @@ impl<'window_lifetime> winit::application::ApplicationHandler for WinitApplicati
                 ..
             } => {
                 match (code, state.is_pressed()) {
+                    // Ao pressionar Escape (Esc)
                     (winit::keyboard::KeyCode::Escape, true) => {
+                        // Encerra o loop da janela
                         event_loop.exit();
                     },
                     _ => ()
@@ -317,10 +583,10 @@ fn run_window() -> Result<(), winit::error::EventLoopError> {
     event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
 
     // Declara a aplicação
-    let mut wAplication = WinitApplication::default();
+    let mut winit_application = WinitApplication::default();
 
     // Executa a aplicação no evento de loop
-    event_loop.run_app(&mut wAplication)
+    event_loop.run_app(&mut winit_application)
 }
 
 // Função principal

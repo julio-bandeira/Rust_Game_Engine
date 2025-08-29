@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+anyhow = "1.0.99"
+bytemuck = "1.23.2"
 image = "0.25.6"
 pollster = "0.4.0"
 wgpu = "26.0.1"

@@ -1,6 +1,7 @@
 # Rust_Game_Engine
 Study of the fundamentals of a game engine using Rust (winit + wgpu)
 
+```
 ┌──────────────────────────────┐
 │   Frame Loop (uma iteração)  │
 └───────┬──────────────────────┘
@@ -36,6 +37,7 @@ Study of the fundamentals of a game engine using Rust (winit + wgpu)
 ┌─────────────────────────────┐
 │ Objeto renderizado na tela  │
 └─────────────────────────────┘
+```
 
 Frame Loop:
 Cada iteração do loop principal processa todos os objetos que devem ser desenhados naquele frame.
