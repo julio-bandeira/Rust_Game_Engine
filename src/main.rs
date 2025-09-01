@@ -1,5 +1,179 @@
+use cgmath::SquareMatrix;
 use image::GenericImageView;
 use wgpu::util::DeviceExt;
+use cgmath::InnerSpace;
+
+// Classe para criar isntancias
+//----------------------------------------------------------------------------------
+
+//----------------------------------------------------------------------------------
+
+// Classe para criar Camera Controller
+//----------------------------------------------------------------------------------
+struct CameraController {
+    speed: f32,
+    is_forward_pressed: bool,
+    is_backward_pressed: bool,
+    is_left_pressed: bool,
+    is_right_pressed: bool,
+}
+
+impl CameraController {
+    //
+    fn new(speed: f32) -> Self {
+        Self {
+            speed: speed,
+            is_forward_pressed: false,
+            is_backward_pressed: false,
+            is_left_pressed: false,
+            is_right_pressed: false
+        }
+    }
+
+    //
+    fn process_events(&mut self, event: &winit::event::WindowEvent) -> bool {
+        match event {
+            //
+            winit::event::WindowEvent::KeyboardInput {
+                event:
+                    winit::event::KeyEvent {
+                        state,
+                        physical_key: winit::keyboard::PhysicalKey::Code(keycode),
+                        ..
+                    },
+                ..
+            } => {
+                let is_pressed = *state == winit::event::ElementState::Pressed;
+                match keycode {
+                    //
+                    winit::keyboard::KeyCode::KeyW | winit::keyboard::KeyCode::ArrowUp => {
+                        self.is_forward_pressed = is_pressed;
+                        true
+                    }
+                    //
+                    winit::keyboard::KeyCode::KeyA | winit::keyboard::KeyCode::ArrowLeft => {
+                        self.is_left_pressed = is_pressed;
+                        true
+                    }
+                    //
+                    winit::keyboard::KeyCode::KeyS | winit::keyboard::KeyCode::ArrowDown => {
+                        self.is_backward_pressed = is_pressed;
+                        true
+                    }
+                    //
+                    winit::keyboard::KeyCode::KeyD | winit::keyboard::KeyCode::ArrowRight => {
+                        self.is_right_pressed = is_pressed;
+                        true
+                    }
+                    _ => false,
+                }
+            },
+            //winit::event::WindowEvent::CursorMoved { device_id, position },
+            _ => false
+        }
+    }
+
+    //
+    fn update_camera(&self, camera: &mut Camera) {
+        //
+        let forward = camera.target - camera.eye;
+        //
+        let forward_norm = forward.normalize();
+        //
+        let forward_mag = forward.magnitude();
+
+        // Prevents glitching when the camera gets too close to the center of the scene.
+        //
+        if self.is_forward_pressed && forward_mag > self.speed {
+            //
+            camera.eye += forward_norm * self.speed;
+        }
+        //
+        if self.is_backward_pressed {
+            //
+            camera.eye -= forward_norm * self.speed;
+        }
+
+        //
+        let right = forward_norm.cross(camera.up);
+
+        // Redo radius calc in case the forward/backward is pressed.
+        let forward = camera.target - camera.eye;
+        let forward_mag = forward.magnitude();
+
+        //
+        if self.is_right_pressed {
+            // Rescale the distance between the target and the eye so 
+            // that it doesn't change. The eye, therefore, still 
+            // lies on the circle made by the target and eye.
+            //
+            camera.eye = camera.target - (forward + right * self.speed).normalize() * forward_mag;
+        }
+        //
+        if self.is_left_pressed {
+            //
+            camera.eye = camera.target - (forward - right * self.speed).normalize() * forward_mag;
+        }
+    }
+}
+//----------------------------------------------------------------------------------
+
+// Classe para criar CameraUniform <mudar comentário depois>
+//----------------------------------------------------------------------------------
+#[repr(C)]
+#[derive(Debug, Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+struct CameraUniform {
+    view_proj: [[f32; 4]; 4]
+}
+
+impl CameraUniform {
+    //
+    fn new() -> Self {
+        Self {
+            view_proj: cgmath::Matrix4::identity().into()
+        }
+    }
+
+    //
+    fn update_view_proj(&mut self, camera: &Camera) {
+        self.view_proj = camera.build_view_projection_matrix().into();
+    }
+}
+//----------------------------------------------------------------------------------
+
+// Classe para criar camera
+//----------------------------------------------------------------------------------
+struct Camera {
+    eye: cgmath::Point3<f32>,
+    target: cgmath::Point3<f32>,
+    up: cgmath::Vector3<f32>,
+    aspect: f32,
+    fovy: f32,
+    znear: f32,
+    zfar: f32
+}
+
+impl Camera {
+    //
+    #[rustfmt::skip]
+    const OPENGL_TO_WGPU_MATRIX: cgmath::Matrix4<f32> = cgmath::Matrix4::from_cols(
+        cgmath::Vector4::new(1.0, 0.0, 0.0, 0.0),
+        cgmath::Vector4::new(0.0, 1.0, 0.0, 0.0),
+        cgmath::Vector4::new(0.0, 0.0, 0.5, 0.0),
+        cgmath::Vector4::new(0.0, 0.0, 0.5, 1.0)
+    );
+
+    //
+    fn build_view_projection_matrix(&self) -> cgmath::Matrix4<f32> {
+        //
+        let view = cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up);
+        //
+        let proj = cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar);
+
+        return Self::OPENGL_TO_WGPU_MATRIX * proj * view
+    }
+}
+//----------------------------------------------------------------------------------
 
 // Classe para criar texturas
 //----------------------------------------------------------------------------------
@@ -171,6 +345,11 @@ struct WgpuContext<'window_lifetime> {
     diffuse_bind_group: wgpu::BindGroup,
     diffuse_texture: Texture,
     surface_configuration: wgpu::SurfaceConfiguration,
+    camera: Camera,
+    camera_uniform: CameraUniform,
+    camera_buffer: wgpu::Buffer,
+    camera_bind_group: wgpu::BindGroup,
+    camera_controller: CameraController,
     render_pipeline: wgpu::RenderPipeline
 }
 
@@ -325,12 +504,79 @@ impl<'window_lifetime> WgpuContext<'window_lifetime> {
                 }
             );
         
+        //
+        let camera = Camera {
+            eye: (0.0, 1.0, 2.0).into(),
+            target: (0.0, 0.0, 0.0).into(),
+            up: cgmath::Vector3::unit_y(),
+            aspect: surface_configuration.width as f32 / surface_configuration.height as f32,
+            fovy: 45.0,
+            znear: 0.1,
+            zfar: 100.0
+        };
+
+        //
+        let mut camera_uniform = CameraUniform::new();
+
+        //
+        camera_uniform.update_view_proj(&camera);
+
+        //
+        let camera_buffer = device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor{
+                label: Some("Camera Buffer"),
+                contents: bytemuck::cast_slice(&[camera_uniform]),
+                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST
+            }
+        );
+
+        //
+        let camera_bind_group_layout = device
+            .create_bind_group_layout(
+                &wgpu::BindGroupLayoutDescriptor {
+                    label: Some("Camera Bind Group Layout"),
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::VERTEX,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: None
+                            },
+                            count: None
+                        }
+                    ]
+                }
+            );
+
+        //
+        let camera_bind_group = device
+            .create_bind_group(
+                &wgpu::BindGroupDescriptor {
+                    label: Some("Camera Bind Group"),
+                    layout: &camera_bind_group_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: camera_buffer.as_entire_binding()
+                        }
+                    ]
+                }
+            );
+        
+        //
+        let camera_controller = CameraController::new(0.2);
+        
         // Define como os shaders vão receber recursos externos (texturas, buffers uniformes, samplers, etc.).
         let render_pipeline_layout = device
             .create_pipeline_layout(
                 &wgpu::PipelineLayoutDescriptor {
                     label: Some("Render Pipeline Layout"),
-                    bind_group_layouts: &[&texture_bind_group_layout],
+                    bind_group_layouts: &[
+                        &texture_bind_group_layout,
+                        &camera_bind_group_layout
+                    ],
                     push_constant_ranges: &[]
                 }
             );
@@ -385,6 +631,11 @@ impl<'window_lifetime> WgpuContext<'window_lifetime> {
             diffuse_bind_group,
             diffuse_texture,
             surface_configuration,
+            camera,
+            camera_uniform,
+            camera_buffer,
+            camera_bind_group,
+            camera_controller,
             render_pipeline
         }
     }
@@ -394,6 +645,27 @@ impl<'window_lifetime> WgpuContext<'window_lifetime> {
         self.surface_configuration.width = new_size.width.max(1);
         self.surface_configuration.height = new_size.height.max(1);
         self.surface.configure(&self.device, &self.surface_configuration);
+    }
+
+    //
+    fn input(&mut self, event: &winit::event::WindowEvent) -> bool {
+        //
+        self.camera_controller.process_events(event)
+    }
+
+    //
+    fn update(&mut self) {
+        //
+        self.camera_controller.update_camera(&mut self.camera);
+        //
+        self.camera_uniform.update_view_proj(&self.camera);
+        //
+        self.queue
+            .write_buffer(
+                &self.camera_buffer,
+                0,
+                bytemuck::cast_slice(&[self.camera_uniform])
+            );
     }
 
     // Renderiza a imagem na janela
@@ -453,6 +725,9 @@ impl<'window_lifetime> WgpuContext<'window_lifetime> {
 
             //
             render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
+            
+            //
+            render_pass.set_bind_group(1, &self.camera_bind_group, &[]);
 
             // Define o vertex buffer enviado para GPU -- talvez mudar commentario --
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
@@ -514,6 +789,20 @@ impl<'window_lifetime> winit::application::ApplicationHandler for WinitApplicati
         window_id: winit::window::WindowId,
         event: winit::event::WindowEvent,
     ) {
+        if let (
+            Some(window),
+            Some(wgpu_context)
+        ) = (
+            self.window.as_ref(),
+            self.wgpu_context.as_mut()
+        ) {
+            //
+            wgpu_context.input(&event);
+            //
+            wgpu_context.update();
+        }
+
+        //
         match event {
             // Evento quando a janela é fechada (X da janela)
             winit::event::WindowEvent::CloseRequested => {
