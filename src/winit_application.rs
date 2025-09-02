@@ -4,8 +4,8 @@ use crate::wgpu_context::WgpuContext;
 
 #[derive(Default)]
 pub struct WinitApplication<'window_lifetime> {
-    window: Option<std::sync::Arc<winit::window::Window>>,
-    wgpu_context: Option<WgpuContext<'window_lifetime>>
+    pub window: Option<std::sync::Arc<winit::window::Window>>,
+    pub wgpu_context: Option<WgpuContext<'window_lifetime>>
 }
 
 impl<'window_lifetime> winit::application::ApplicationHandler for WinitApplication<'window_lifetime> {

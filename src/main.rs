@@ -7,6 +7,7 @@ mod texture;
 mod camera;
 mod camera_uniform;
 mod camera_controller;
+mod instance;
 
 // Inicia o evento de loop da janela
 fn run_window() -> Result<(), winit::error::EventLoopError> {

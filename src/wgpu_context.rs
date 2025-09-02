@@ -6,6 +6,9 @@ use crate::texture::Texture;
 use crate::camera::Camera;
 use crate::camera_uniform::CameraUniform;
 use crate::camera_controller::CameraController;
+use crate::instance::Instance;
+use crate::instance::InstanceRaw;
+use cgmath::prelude::*;
 
 // Define um array constante de vértices (Vertex) com posições 3D e coordenadas de textura
 const VERTICES: &[Vertex] = &[
@@ -21,24 +24,34 @@ const INDICES: &[u16] = &[
     0, 2, 3,
 ];
 
+const NUM_INSTANCE_PER_RAW: u32 = 10;
+const INSTANCE_DISPLACEMENT: cgmath::Vector3<f32> = cgmath::Vector3::new(
+    NUM_INSTANCE_PER_RAW as f32 * 0.5,
+    0.0,
+    NUM_INSTANCE_PER_RAW as f32 * 0.5
+);
+
 pub struct WgpuContext<'window_lifetime> {
-    surface: wgpu::Surface<'window_lifetime>,
-    adapter: wgpu::Adapter,
-    device: wgpu::Device,
-    vertex_buffer: wgpu::Buffer,
-    num_vertices: u32,
-    index_buffer: wgpu::Buffer,
-    num_indices: u32,
-    queue: wgpu::Queue,
-    diffuse_bind_group: wgpu::BindGroup,
-    diffuse_texture: Texture,
-    surface_configuration: wgpu::SurfaceConfiguration,
-    camera: Camera,
-    camera_uniform: CameraUniform,
-    camera_buffer: wgpu::Buffer,
-    camera_bind_group: wgpu::BindGroup,
-    camera_controller: CameraController,
-    render_pipeline: wgpu::RenderPipeline
+    pub surface: wgpu::Surface<'window_lifetime>,
+    pub adapter: wgpu::Adapter,
+    pub device: wgpu::Device,
+    pub vertex_buffer: wgpu::Buffer,
+    pub num_vertices: u32,
+    pub index_buffer: wgpu::Buffer,
+    pub num_indices: u32,
+    pub queue: wgpu::Queue,
+    pub diffuse_bind_group: wgpu::BindGroup,
+    pub diffuse_texture: Texture,
+    pub surface_configuration: wgpu::SurfaceConfiguration,
+    pub camera: Camera,
+    pub camera_uniform: CameraUniform,
+    pub camera_buffer: wgpu::Buffer,
+    pub camera_bind_group: wgpu::BindGroup,
+    pub camera_controller: CameraController,
+    pub render_pipeline: wgpu::RenderPipeline,
+    pub instances: Vec<Instance>,
+    pub instance_buffer: wgpu::Buffer,
+    pub depth_texture: Texture
 }
 
 impl<'window_lifetime> WgpuContext<'window_lifetime> {
@@ -191,7 +204,7 @@ impl<'window_lifetime> WgpuContext<'window_lifetime> {
                     source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into())
                 }
             );
-        
+
         //
         let camera = Camera {
             eye: (0.0, 1.0, 2.0).into(),
@@ -255,7 +268,48 @@ impl<'window_lifetime> WgpuContext<'window_lifetime> {
         
         //
         let camera_controller = CameraController::new(0.2);
+
+        //
+        let depth_texture = Texture::create_depth_texture(&device, &surface_configuration, "depth_texture");
         
+        //
+        let instances = (0..NUM_INSTANCE_PER_RAW).flat_map(
+            |z| {
+                (0..NUM_INSTANCE_PER_RAW).map(
+                    move |x| {
+                        let position = cgmath::Vector3 {
+                            x: x as f32,
+                            y: 0.0,
+                            z: z as f32
+                        } - INSTANCE_DISPLACEMENT;
+
+                        let rotation = if position.is_zero() {
+                            cgmath::Quaternion::from_axis_angle(cgmath::Vector3::unit_z(), cgmath::Deg(0.0))
+                        }else {
+                            cgmath::Quaternion::from_axis_angle(position.normalize(), cgmath::Deg(45.0))
+                        };
+
+                        Instance {
+                            position,
+                            rotation
+                        }
+                    }
+                )
+            }
+        ).collect::<Vec<_>>();
+
+        //
+        let instance_data = instances.iter().map(Instance::to_raw).collect::<Vec<_>>();
+
+        //
+        let instance_buffer = device.create_buffer_init(
+            &wgpu::util::BufferInitDescriptor {
+                label: Some("Instance Buffer"),
+                contents: bytemuck::cast_slice(&instance_data),
+                usage: wgpu::BufferUsages::VERTEX
+            }
+        );
+
         // Define como os shaders vão receber recursos externos (texturas, buffers uniformes, samplers, etc.).
         let render_pipeline_layout = device
             .create_pipeline_layout(
@@ -280,11 +334,20 @@ impl<'window_lifetime> WgpuContext<'window_lifetime> {
                         entry_point: Some("vs_main"),
                         compilation_options: wgpu::PipelineCompilationOptions::default(),
                         buffers: &[
-                            Vertex::desc() // Informa o buffer para o wgsl
+                            Vertex::desc(), // Informa o buffer para o wgsl
+                            InstanceRaw::desc() // Informa o buffer para o wgsl
                         ]
                     },
                     primitive: wgpu::PrimitiveState::default(), // Triangle List
-                    depth_stencil: None,
+                    depth_stencil: Some(
+                        wgpu::DepthStencilState {
+                            format: Texture::DEPTH_FORMAT,
+                            depth_write_enabled: true,
+                            depth_compare: wgpu::CompareFunction::LessEqual,
+                            stencil: wgpu::StencilState::default(),
+                            bias: wgpu::DepthBiasState::default()
+                        }
+                    ),
                     multisample: wgpu::MultisampleState::default(),
                     fragment: Some(
                         wgpu::FragmentState {
@@ -324,7 +387,10 @@ impl<'window_lifetime> WgpuContext<'window_lifetime> {
             camera_buffer,
             camera_bind_group,
             camera_controller,
-            render_pipeline
+            render_pipeline,
+            instances,
+            instance_buffer,
+            depth_texture
         }
     }
 
@@ -332,6 +398,7 @@ impl<'window_lifetime> WgpuContext<'window_lifetime> {
     pub fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
         self.surface_configuration.width = new_size.width.max(1);
         self.surface_configuration.height = new_size.height.max(1);
+        self.depth_texture = Texture::create_depth_texture(&self.device, &self.surface_configuration, "depth_texture");
         self.surface.configure(&self.device, &self.surface_configuration);
     }
 
@@ -401,7 +468,18 @@ impl<'window_lifetime> WgpuContext<'window_lifetime> {
                             }
                         )
                     ],
-                    depth_stencil_attachment: None,
+                    depth_stencil_attachment: Some(
+                        wgpu::RenderPassDepthStencilAttachment {
+                            view: &self.depth_texture.view,
+                            depth_ops: Some(
+                                wgpu::Operations {
+                                    load: wgpu::LoadOp::Clear(1.0),
+                                    store: wgpu::StoreOp::Store
+                                }
+                            ),
+                            stencil_ops: None
+                        }
+                    ),
                     //timestamp_writes: (),
                     //occlusion_query_set: ()
                     ..Default::default()
@@ -420,12 +498,16 @@ impl<'window_lifetime> WgpuContext<'window_lifetime> {
             // Define o vertex buffer enviado para GPU -- talvez mudar commentario --
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
 
+            //
+            render_pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+
             // Define o index buffer enviado para GPU -- talvez mudar commentario --
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
 
             // Desenha os vértices: Esse comando dispara o vertex shader e o fragment shader do seu arquivo <archive_name>.wgsl.
             //render_pass.draw(0..self.num_vertices, 0..1); // sem index
-            render_pass.draw_indexed(0..self.num_indices, 0, 0..1); // com index
+            //render_pass.draw_indexed(0..self.num_indices, 0, 0..1); // com index
+            render_pass.draw_indexed(0..self.num_indices, 0, 0..self.instances.len() as _); // com index
         }
 
         // Envia os comandos para execução pela GPU.
