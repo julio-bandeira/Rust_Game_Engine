@@ -8,6 +8,8 @@ mod camera;
 mod camera_uniform;
 mod camera_controller;
 mod instance;
+mod resource;
+mod model;
 
 // Inicia o evento de loop da janela
 fn run_window() -> Result<(), winit::error::EventLoopError> {
