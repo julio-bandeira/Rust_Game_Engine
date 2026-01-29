@@ -2,6 +2,7 @@
 pub struct WinitContext<'app_lifetime> {
     pub window: Option<std::sync::Arc<winit::window::Window>>,
     pub wgpu_context: Option<crate::wgpu_context::WgpuContext<'app_lifetime>>,
+    pub config_controller: Option<crate::config_controller::ConfigController>,
     pub last_frame: Option<std::time::Instant>
 }
 
@@ -21,7 +22,18 @@ impl<'app_lifetime> winit::application::ApplicationHandler for WinitContext<'app
             // Define os valores da classe WinitApplication
             self.window = Some(new_window.clone());
             self.wgpu_context = Some(crate::wgpu_context::WgpuContext::new(new_window.clone()));
-            self.last_frame = Some(std::time::Instant::now())
+            self.config_controller= Some(crate::config_controller::ConfigController::new());
+            self.last_frame = Some(std::time::Instant::now());
+
+            // Aplica as configurações
+            if let (Some(config_controller), Some(window), Some(gpu)) = (
+                self.config_controller.as_ref(),
+                self.window.as_ref(),
+                self.wgpu_context.as_mut(),
+            ) {
+                config_controller.apply_window(window);
+                config_controller.apply_gpu(gpu);
+            }
         }
     }
 
@@ -36,6 +48,26 @@ impl<'app_lifetime> winit::application::ApplicationHandler for WinitContext<'app
             winit::event::WindowEvent::CloseRequested => {
                 // Encerra o loop da janela
                 event_loop.exit();
+            },
+            // Evento quando as teclas são acionadas
+            winit::event::WindowEvent::KeyboardInput {
+                event: winit::event::KeyEvent {
+                    physical_key: winit::keyboard::PhysicalKey::Code(
+                        code
+                    ),
+                    state,
+                    ..
+                },
+                ..
+            } => {
+                match (code, state.is_pressed()) {
+                    // Ao pressionar Escape (Esc)
+                    (winit::keyboard::KeyCode::Escape, true) => {
+                        // Encerra o loop da janela
+                        event_loop.exit();
+                    },
+                    _ => ()
+                }
             },
             // Evento quando a tela é redimensionada
             winit::event::WindowEvent::Resized(new_size) => {

@@ -1,4 +1,5 @@
 mod app_controller;
+mod config_controller;
 mod winit_context;
 mod wgpu_context;
 
