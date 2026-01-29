@@ -1,12 +1,11 @@
-mod core;
-
-use core::app::App;
-use env_logger;
+mod app_controller;
+mod winit_context;
+mod wgpu_context;
 
 fn main() {
-    // Inicializar logs (wgpu usa bastante)
-    env_logger::init();
+    // Instância o controle da aplicação
+    let mut app = crate::app_controller::AppController::new();
 
-    // Cria a aplicação e roda até fechar
-    pollster::block_on(App::run());
+    // Inicia o loop da aplicação
+    app.run().unwrap();
 }
