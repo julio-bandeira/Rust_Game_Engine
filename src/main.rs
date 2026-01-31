@@ -2,6 +2,9 @@ mod app_controller;
 mod config_controller;
 mod winit_context;
 mod wgpu_context;
+mod scene_controller;
+mod scene;
+mod scenes;
 
 fn main() {
     // Instância o controle da aplicação

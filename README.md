@@ -136,3 +136,10 @@ A GPU escreve o resultado final pixel a pixel na tela.
 | Surface.present()    |
 +----------------------+
 
+//------------------------------
+Ver posteriormente (sugestões GPTlianas):
+- como ter SceneStack (pause por cima do gameplay)
+- como separar RenderScene / LogicScene
+- como permitir cenas compartilharem recursos
+- como fazer hot reload de cena
+//-------------------------------

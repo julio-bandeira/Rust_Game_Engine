@@ -3,6 +3,7 @@ pub struct WinitContext<'app_lifetime> {
     pub window: Option<std::sync::Arc<winit::window::Window>>,
     pub wgpu_context: Option<crate::wgpu_context::WgpuContext<'app_lifetime>>,
     pub config_controller: Option<crate::config_controller::ConfigController>,
+    pub scene_controller: Option<crate::scene_controller::SceneController>,
     pub last_frame: Option<std::time::Instant>
 }
 
@@ -22,17 +23,26 @@ impl<'app_lifetime> winit::application::ApplicationHandler for WinitContext<'app
             // Define os valores da classe WinitApplication
             self.window = Some(new_window.clone());
             self.wgpu_context = Some(crate::wgpu_context::WgpuContext::new(new_window.clone()));
-            self.config_controller= Some(crate::config_controller::ConfigController::new());
+            self.config_controller = Some(crate::config_controller::ConfigController::new());
+            self.scene_controller = Some(crate::scene_controller::SceneController::new());
+
             self.last_frame = Some(std::time::Instant::now());
 
             // Aplica as configurações
-            if let (Some(config_controller), Some(window), Some(gpu)) = (
+            if let (
+                Some(config_controller),
+                Some(window),
+                Some(wgpu_context),
+                Some(scene_controller)
+            ) = (
                 self.config_controller.as_ref(),
                 self.window.as_ref(),
                 self.wgpu_context.as_mut(),
+                self.scene_controller.as_mut()
             ) {
                 config_controller.apply_window(window);
-                config_controller.apply_gpu(gpu);
+                config_controller.apply_gpu(wgpu_context);
+                scene_controller.set_scene(Box::new(crate::scenes::main_menu_scene::MainMenuScene::new()), wgpu_context);
             }
         }
     }
@@ -97,15 +107,18 @@ impl<'app_lifetime> winit::application::ApplicationHandler for WinitContext<'app
 
         if let (
             Some(window),
-            Some(wgpu_context)
+            Some(wgpu_context),
+            Some(scene_controller)
         ) = (
             self.window.as_ref(),
-            self.wgpu_context.as_mut()
+            self.wgpu_context.as_mut(),
+            self.scene_controller.as_mut()
         ) {
-            // Chama a função para desenhar na tela
-            wgpu_context.render();
-
-            // Solicita uma nova requisição de desenho (atualiza o loop continuamente)
+            // Chama a função para atualizar e desenhar a cena na tela
+            scene_controller.update(delta.as_secs_f32());
+            scene_controller.render(wgpu_context);
+    
+            // Solicita uma nova requisição de desenho (atualiza o loop continuamente)S
             window.request_redraw();
         }
     }
