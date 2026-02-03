@@ -42,6 +42,7 @@ impl<'app_lifetime> winit::application::ApplicationHandler for WinitContext<'app
             ) {
                 config_controller.apply_window(window);
                 config_controller.apply_gpu(wgpu_context);
+                //scene_controller.set_scene(Box::new(crate::scenes::gameplay_scene::GameplayScene::new()), wgpu_context);
                 scene_controller.set_scene(Box::new(crate::scenes::main_menu_scene::MainMenuScene::new()), wgpu_context);
             }
         }
@@ -93,6 +94,16 @@ impl<'app_lifetime> winit::application::ApplicationHandler for WinitContext<'app
             },
             _ => ()
         }
+        // Aplica as configurações
+        if let (
+            Some(window),
+            Some(scene_controller)
+        ) = (
+            self.window.as_ref(),
+            self.scene_controller.as_mut()
+        ) {
+            scene_controller.handle_event(&event);
+        }
     }
 
     // Aqui controla o ciclo de atualização da aplicação (update e render)
@@ -115,7 +126,7 @@ impl<'app_lifetime> winit::application::ApplicationHandler for WinitContext<'app
             self.scene_controller.as_mut()
         ) {
             // Chama a função para atualizar e desenhar a cena na tela
-            scene_controller.update(delta.as_secs_f32());
+            scene_controller.update(delta.as_secs_f32(), wgpu_context);
             scene_controller.render(wgpu_context);
     
             // Solicita uma nova requisição de desenho (atualiza o loop continuamente)S

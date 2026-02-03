@@ -1,6 +1,5 @@
 // Trait para padronizar os comando de gerenciamento das cenas
 pub trait Scene {
-
     // Quando a cena passa a existir
     fn on_enter(&mut self, wgpu: &mut crate::wgpu_context::WgpuContext);
 
@@ -8,7 +7,7 @@ pub trait Scene {
     fn on_exit(&mut self, wgpu: &mut crate::wgpu_context::WgpuContext);
 
     // Atualizar informações da cena
-    fn update(&mut self, delta_time: f32);
+    fn update(&mut self, delta_time: f32, _wgpu: &mut crate::wgpu_context::WgpuContext);
 
     // Renderizar tela
     fn render(&mut self, wgpu: &mut crate::wgpu_context::WgpuContext);

@@ -143,3 +143,4 @@ Ver posteriormente (sugestões GPTlianas):
 - como permitir cenas compartilharem recursos
 - como fazer hot reload de cena
 //-------------------------------
+tree /F > estrutura.txt

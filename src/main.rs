@@ -6,6 +6,10 @@ mod scene_controller;
 mod scene;
 mod scenes;
 
+mod render_pipeline_controller;
+mod render;
+mod resource;
+
 fn main() {
     // Instância o controle da aplicação
     let mut app = crate::app_controller::AppController::new();

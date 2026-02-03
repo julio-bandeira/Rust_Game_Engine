@@ -27,9 +27,9 @@ impl SceneController {
     }
 
     // Atualiza informações da cena atual
-    pub fn update(&mut self, delta_time: f32) {
+    pub fn update(&mut self, delta_time: f32, _wgpu: &mut crate::wgpu_context::WgpuContext) {
         if let Some(scene) = self.current_scene.as_mut() {
-            scene.update(delta_time);
+            scene.update(delta_time, _wgpu);
         }
     }
 
